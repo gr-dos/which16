@@ -54,19 +54,32 @@ standard error unless `-s` is given.
 
 ## How names are looked up
 
-`which` follows `COMMAND.COM`:
+`which` follows the lookup in the MS-DOS 4.0 `COMMAND.COM` source
+(`PATH1.ASM` and `PATH2.ASM` in
+[microsoft/MS-DOS](https://github.com/microsoft/MS-DOS)):
 
-- The current directory is searched first, then each directory in
-  `PATH`, in order.
-- In each directory `NAME.COM`, `NAME.EXE` and `NAME.BAT` are tried, in
-  that order. Without `-a`, the first one found is the answer, so a
-  `FOO.EXE` in the current directory wins over a `FOO.COM` in `PATH`.
-- An explicit extension restricts the search to that file: `which
-  foo.exe` never reports `foo.com`. Only `.COM`, `.EXE` and `.BAT` name a
-  program, so `which readme.txt` finds nothing even if the file exists.
-- A NAME with a drive or directory (`C:\BIN\FOO`, `BIN\FOO`, `..\FOO`,
-  `C:FOO`) is looked for only there; `PATH` is not searched.
+- NAME is looked for first where it says: the current directory, or
+  for `C:FOO` the current directory of drive C, or for `C:\BIN\FOO`,
+  `BIN\FOO`, `.\FOO`, `..\FOO` or `\FOO` that directory.
+- Then, unless NAME contains a directory, each directory in `PATH` is
+  searched in order. A drive alone is not a directory: `C:FOO` falls
+  back to `PATH` just as `FOO` does.
+- Without an extension, `NAME.COM`, `NAME.EXE` and `NAME.BAT` are tried
+  in each directory, in that order. Without `-a`, the first one found is
+  the answer, so a `FOO.EXE` in the current directory wins over a
+  `FOO.COM` in `PATH`.
+- With an extension (any dot in the name), NAME is handed to DOS as
+  typed, and the file found counts only if its extension is `.COM`,
+  `.EXE` or `.BAT`. So `which foo.exe` never reports `foo.com`, `which
+  readme.txt` finds nothing even if the file exists, and `foo.` finds
+  nothing. Because DOS applies its 8.3 rules, an overlong name or
+  extension is truncated: `longnameextra` finds `LONGNAME.COM` and
+  `foo.comx` finds `FOO.COM`, as they would at the prompt.
+- Hidden and read-only programs are found; system files are not.
 - Wildcards are not allowed, and directories are never matches.
+
+One deliberate difference: `/` is accepted as a directory separator
+(`which bin/foo`), where `COMMAND.COM` would take it as a switch.
 
 Results are printed as full paths in lower case, with the extension
 (`c:\bin\foo.exe`). `PATH` entries are made absolute, so relative

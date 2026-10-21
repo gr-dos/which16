@@ -35,13 +35,16 @@ export LC_ALL
 # fixtures
 #
 #   c:\       which.exe local.bat qux.exe
-#   c:\bin1   foo.com foo.exe bar.bat
+#   c:\bin1   foo.com foo.exe bar.bat longname.com plain
+#             hid.com (hidden) sys.com (system)
 #   c:\bin2   foo.exe qux.com readme.txt dir.exe\ (a directory)
+#   d:\       empty, for drive-relative names
 
 cd "$work" || exit 2
 cp "$exe" which.exe
-mkdir bin1 bin2 bin2/dir.exe
+mkdir bin1 bin2 bin2/dir.exe d
 for f in local.bat qux.exe bin1/foo.com bin1/foo.exe bin1/bar.bat \
+         bin1/longname.com bin1/plain bin1/hid.com bin1/sys.com \
          bin2/foo.exe bin2/qux.com bin2/readme.txt; do
     echo x > "$f"
 done
@@ -62,6 +65,8 @@ EOS
 
 cat > steps.bat <<'EOS'
 @echo off
+attrib +h c:\bin1\hid.com
+attrib +s c:\bin1\sys.com
 set PATH=C:\BIN1;C:\BIN2
 rem --- first match: .COM before .EXE before .BAT
 which foo >o1.txt
@@ -150,12 +155,55 @@ rem --- -- ends options
 set PATH=C:\BIN1;C:\BIN2
 which -- foo >o34.txt
 call rc 34
+rem --- names are passed to DOS, so 8.3 rules apply
+which -a foo.comx >o35.txt
+call rc 35
+which foo.exe.com >o36.txt
+call rc 36
+which longnameextra >o37.txt
+call rc 37
+which plain. >o38.txt
+call rc 38
+which plain >o39.txt
+call rc 39
+rem --- hidden files are found, system files are not
+which hid >o40.txt
+call rc 40
+which sys >o41.txt
+call rc 41
+rem --- explicit directories
+which .\qux >o42.txt
+call rc 42
+which .\foo >o43.txt
+call rc 43
+which bin2/foo >o44.txt
+call rc 44
+rem --- drive-relative names, from another drive
+cd bin2
+d:
+c:\which -a c:foo >c:\o45.txt
+call c:\rc 45
+c:\which c:bar >c:\o46.txt
+call c:\rc 46
+c:\which c:..\local >c:\o47.txt
+call c:\rc 47
+c:\which \local >c:\o48.txt
+call c:\rc 48
+c:\which .\foo >c:\o49.txt
+call c:\rc 49
+c:
+rem --- root of the current drive
+c:\which \local >c:\o50.txt
+call c:\rc 50
+c:\which \foo >c:\o51.txt
+call c:\rc 51
+cd \
 EOS
 
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy timeout 300 \
     "$DOSBOX" -defaultconf -silent -nogui -nomenu \
     -set "cpu cycles=max" \
-    -c "mount c \"$work\"" -c "c:" \
+    -c "mount c \"$work\"" -c "mount d \"$work/d\"" -c "c:" \
     -c "steps.bat" -c "exit" >dosbox.log 2>&1
 
 # ------------------------------------------------------------------
@@ -335,6 +383,70 @@ rc 34 0
 expect 34 <<'EOS'
 c:\bin1\foo.com
 EOS
+
+# 8.3 rules
+rc 35 0
+expect 35 <<'EOS'
+c:\bin1\foo.com
+EOS
+rc 36 1
+expect 36 < /dev/null
+rc 37 0
+expect 37 <<'EOS'
+c:\bin1\longname.com
+EOS
+rc 38 1
+expect 38 < /dev/null
+rc 39 1
+expect 39 < /dev/null
+
+# attributes
+rc 40 0
+expect 40 <<'EOS'
+c:\bin1\hid.com
+EOS
+rc 41 1
+expect 41 < /dev/null
+
+# explicit directories
+rc 42 0
+expect 42 <<'EOS'
+c:\qux.exe
+EOS
+rc 43 1
+expect 43 < /dev/null
+rc 44 0
+expect 44 <<'EOS'
+c:\bin2\foo.exe
+EOS
+
+# drive-relative, from d: with c: in \bin2
+rc 45 0
+expect 45 <<'EOS'
+c:\bin2\foo.exe
+c:\bin1\foo.com
+c:\bin1\foo.exe
+EOS
+rc 46 0
+expect 46 <<'EOS'
+c:\bin1\bar.bat
+EOS
+rc 47 0
+expect 47 <<'EOS'
+c:\local.bat
+EOS
+rc 48 1
+expect 48 < /dev/null
+rc 49 1
+expect 49 < /dev/null
+
+# root of the current drive
+rc 50 0
+expect 50 <<'EOS'
+c:\local.bat
+EOS
+rc 51 1
+expect 51 < /dev/null
 
 # ------------------------------------------------------------------
 

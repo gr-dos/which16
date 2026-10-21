@@ -1,15 +1,18 @@
 /*
  * which - locate a program the way COMMAND.COM would
  *
- * Searches the current directory and then each directory in PATH for
- * NAME.COM, NAME.EXE and NAME.BAT, in that order, and prints the full
- * path of the program COMMAND.COM would run.  As with COMMAND.COM:
+ * The lookup follows MS-DOS 4.0 COMMAND.COM (PATH1.ASM, PATH2.ASM):
  *
- *   - an explicit extension restricts the search to that file, and only
- *     .COM, .EXE and .BAT name a program (FOO.TXT is never found);
- *   - a NAME with a drive or directory (C:\BIN\FOO, BIN\FOO, C:FOO) is
- *     looked for only there, and PATH is not searched;
- *   - wildcards are not allowed.
+ *   - NAME is first looked for where it says: the current directory,
+ *     the current directory of its drive (C:FOO), or its directory
+ *     (C:\BIN\FOO, BIN\FOO, .\FOO).  Unless NAME contains a directory,
+ *     each directory in PATH is then searched in turn.
+ *   - Without an extension, NAME.COM, NAME.EXE and NAME.BAT are tried in
+ *     that order.  With one (a dot anywhere in the name), NAME is passed
+ *     to DOS as typed, so DOS's 8.3 rules apply, and the file found
+ *     counts only if its extension is .COM, .EXE or .BAT.
+ *   - Read-only and hidden files are found; system files are not.
+ *   - Wildcards are not allowed.
  *
  * Paths are printed in full and in lower case, with the extension.
  */
@@ -24,6 +27,7 @@
 #endif
 
 #define MAXDIRS   64
+#define ATTRS     (_A_RDONLY | _A_HIDDEN)
 
 static const char *progname = "which";
 static const char *const exts[] = { "com", "exe", "bat" };
@@ -32,7 +36,7 @@ static const char *const exts[] = { "com", "exe", "bat" };
 static int opt_all;
 static int opt_silent;
 
-static char *dirs[MAXDIRS];   /* search list: current directory, then PATH */
+static char *dirs[MAXDIRS];   /* PATH, normalized and deduplicated */
 static int ndirs;
 
 static void usage(FILE *fp)
@@ -42,8 +46,8 @@ static void usage(FILE *fp)
         "Show the full path of the program COMMAND.COM runs for each NAME.\n"
         "\n"
         "The current directory is searched, then each directory in PATH,\n"
-        "for NAME.COM, NAME.EXE and NAME.BAT.  A NAME with an extension or\n"
-        "a directory is looked for only as given.\n"
+        "for NAME.COM, NAME.EXE and NAME.BAT.  A NAME with an extension is\n"
+        "looked for only as given, and one with a directory only there.\n"
         "\n"
         "  -a, --all      print every match, not just the first\n"
         "  -s, --silent   print nothing; the exit status shows the result\n"
@@ -67,7 +71,7 @@ static int normalize(char *out, const char *dir)
     return 0;
 }
 
-/* Add DIR to the search list unless it is already there. */
+/* Add DIR to the PATH list unless it is already there. */
 static void add_dir(const char *dir)
 {
     char buf[_MAX_PATH];
@@ -87,7 +91,6 @@ static void build_dirs(void)
     const char *path = getenv("PATH");
     char buf[_MAX_PATH];
 
-    add_dir("");
     while (path != NULL && *path) {
         const char *end = strchr(path, ';');
         size_t n = end ? (size_t)(end - path) : strlen(path);
@@ -105,99 +108,98 @@ static void build_dirs(void)
     }
 }
 
+/* Print DIR\NAME, if F is a program.  Returns 1 if it was. */
+static int found(const char *dir, struct find_t *f)
+{
+    const char *dot = strrchr(f->name, '.');
+    size_t i;
+
+    if (f->attrib & (_A_SUBDIR | _A_SYSTEM) || dot == NULL)
+        return 0;
+    for (i = 0; i < NEXTS; i++)
+        if (stricmp(dot + 1, exts[i]) == 0)
+            break;
+    if (i == NEXTS)
+        return 0;
+    if (!opt_silent) {
+        strlwr(f->name);
+        printf("%s%s%s\n", dir,
+               dir[strlen(dir) - 1] == '\\' ? "" : "\\", f->name);
+    }
+    return 1;
+}
+
 /*
- * Look in DIR (normalized) for BASE with each of the extensions in EXTS.
- * Print what is found, stopping at the first match unless -a.
- * Returns the number of matches.
+ * Look in DIR (normalized) for BASE: as given if it has an extension,
+ * otherwise with each program extension in turn.  Prints what is found,
+ * stopping at the first match unless -a.  Returns the number of matches.
  */
-static int search_dir(const char *dir, const char *base,
-                      const char *const *e, int ne)
+static int search_dir(const char *dir, const char *base)
 {
     char pat[_MAX_PATH + 16];
-    const char *sep = dir[strlen(dir) - 1] == '\\' ? "" : "\\";
     struct find_t f;
-    int i, found = 0;
+    int n = 0;
+    size_t i;
 
-    for (i = 0; i < ne; i++) {
-        if (strlen(dir) + strlen(base) + 6 > sizeof pat)
-            return found;
-        sprintf(pat, "%s%s%s.%s", dir, sep, base, e[i]);
-        if (_dos_findfirst(pat, _A_RDONLY | _A_HIDDEN | _A_SYSTEM | _A_ARCH,
-                           &f) != 0)
-            continue;
-        if (f.attrib & (_A_SUBDIR | _A_VOLID))
-            continue;
-        found++;
-        if (!opt_silent) {
-            strlwr(f.name);
-            printf("%s%s%s\n", dir, sep, f.name);
-        }
-        if (!opt_all)
-            break;
+    if (strlen(dir) + strlen(base) + 6 > sizeof pat)
+        return 0;
+    if (strchr(base, '.') != NULL) {
+        sprintf(pat, "%s\\%s", dir, base);
+        if (_dos_findfirst(pat, ATTRS, &f) == 0)
+            n = found(dir, &f);
+        return n;
     }
-    return found;
+    for (i = 0; i < NEXTS; i++) {
+        sprintf(pat, "%s\\%s.%s", dir, base, exts[i]);
+        if (_dos_findfirst(pat, ATTRS, &f) == 0 && found(dir, &f)) {
+            n++;
+            if (!opt_all)
+                break;
+        }
+    }
+    return n;
 }
 
 /* Returns 1 if NAME was found. */
 static int which(const char *name)
 {
-    char dir[_MAX_PATH], tmp[_MAX_PATH], buf[_MAX_PATH];
-    const char *base, *dot, *p;
-    const char *const *e = exts;
-    int ne = NEXTS;
-    int found = 0, i;
-    size_t n;
+    char dir[_MAX_PATH], first[_MAX_PATH];
+    const char *base, *p;
+    int has_dir = 0;
+    int n, i;
 
     if (strchr(name, '*') || strchr(name, '?'))
         return 0;
 
     /* split off any drive or directory */
     base = name;
-    for (p = name; *p; p++)
-        if (*p == '\\' || *p == '/' || *p == ':')
+    for (p = name; *p; p++) {
+        if (*p == '\\' || *p == '/') {
             base = p + 1;
-    if (*base == '\0' || strlen(base) >= sizeof buf)
-        return 0;
-
-    /* an explicit extension must name a program, and is the only one tried */
-    strcpy(buf, base);
-    dot = strrchr(buf, '.');
-    if (dot != NULL) {
-        buf[dot - buf] = '\0';
-        if (dot[1] != '\0') {
-            for (i = 0; i < (int)NEXTS; i++)
-                if (stricmp(dot + 1, exts[i]) == 0)
-                    break;
-            if (i == (int)NEXTS)
-                return 0;
-            e = &exts[i];
-            ne = 1;
+            has_dir = 1;
+        } else if (*p == ':') {
+            base = p + 1;
         }
     }
-    if (buf[0] == '\0')
+    if (*base == '\0' || (size_t)(base - name) >= sizeof dir)
         return 0;
 
-    if (base != name) {
-        /* drive or directory given: look only there */
-        n = base - name;
-        if (n >= sizeof dir)
-            return 0;
-        memcpy(dir, name, n);
-        dir[n] = '\0';
-        /* "C:" alone means the current directory of drive C */
-        if (n == 2 && dir[1] == ':')
-            strcat(dir, ".");
-        if (normalize(tmp, dir) != 0)
-            return 0;
-        return search_dir(tmp, buf, e, ne) > 0;
-    }
+    /* first where NAME says: "C:" alone is C's current directory */
+    memcpy(dir, name, base - name);
+    dir[base - name] = '\0';
+    if (base - name == 2 && dir[1] == ':')
+        strcat(dir, ".");
+    if (normalize(first, dir) != 0)
+        return 0;
+    n = search_dir(first, base);
 
-    for (i = 0; i < ndirs; i++) {
-        found += search_dir(dirs[i], buf, e, ne);
-        if (found && !opt_all)
-            break;
-    }
-    return found > 0;
+    /* then PATH, unless NAME has a directory */
+    if (has_dir)
+        return n > 0;
+    for (i = 0; i < ndirs && (n == 0 || opt_all); i++)
+        if (strcmp(dirs[i], first) != 0)
+            n += search_dir(dirs[i], base);
+    return n > 0;
 }
 
 int main(int argc, char **argv)
