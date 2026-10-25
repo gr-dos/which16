@@ -2,3 +2,4 @@
 *.obj
 *.err
 *.exe
+/smallerc/toolchain/

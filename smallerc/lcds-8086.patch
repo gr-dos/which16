@@ -1,0 +1,61 @@
+--- a/v0100/srclib/rand.c
++++ b/v0100/srclib/rand.c
+@@ -17,11 +17,23 @@
+ 
+ static void helper(unsigned short seed[2])
+ {
+-  asm("mov bx, [bp+4]");
+-  asm("mov eax, [bx]");
+-  asm("imul eax, eax, 1103515245");
+-  asm("add eax, 12345");
+-  asm("mov [bx], eax");
++  // seed = seed * 0x41C64E6D + 12345, with 16-bit multiplies
++  asm("mov bx, [bp+4]\n"
++      "mov ax, [bx]\n"
++      "mov cx, 0x41C6\n"
++      "mul cx\n"
++      "mov si, ax\n"
++      "mov ax, [bx+2]\n"
++      "mov cx, 0x4E6D\n"
++      "mul cx\n"
++      "add si, ax\n"
++      "mov ax, [bx]\n"
++      "mul cx\n"
++      "add dx, si\n"
++      "add ax, 12345\n"
++      "adc dx, 0\n"
++      "mov [bx], ax\n"
++      "mov [bx+2], dx");
+ }
+ 
+ int rand(void)
+--- a/v0100/srclib/system.c
++++ b/v0100/srclib/system.c
+@@ -135,12 +135,12 @@
+ static
+ int DosExec(char* comspec, struct execparams* p, unsigned* error)
+ {
+-  asm("mov     [cs:saveebp], ebp\n"
+-      "mov     [cs:saveesp], esp\n"
++  asm("mov     [cs:savebp], bp\n"
++      "mov     [cs:savesp], sp\n"
+       "mov     [cs:savess], ss\n"
+       "jmp     skipdata\n"
+-      "saveebp dd 0\n"
+-      "saveesp dd 0\n"
++      "savebp  dw 0\n"
++      "savesp  dw 0\n"
+       "savess  dw 0\n"
+       "skipdata:\n"
+ 
+@@ -150,8 +150,8 @@
+       "int     0x21\n"
+ 
+       "mov     ss, [cs:savess]\n"
+-      "mov     esp, [cs:saveesp]\n"
+-      "mov     ebp, [cs:saveebp]\n"
++      "mov     sp, [cs:savesp]\n"
++      "mov     bp, [cs:savebp]\n"
+       "mov     ds, [cs:savess]\n"
+       "mov     es, [cs:savess]\n"
+ 

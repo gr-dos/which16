@@ -1,0 +1,3 @@
+#!/bin/sh
+# nasm with 8086.inc pre-included, for smlrcc -asm (or SMLRASM).
+exec "${NASM:-nasm}" -P"$(dirname "$0")/8086.inc" "$@"

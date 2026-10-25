@@ -19,6 +19,11 @@ Requires Open Watcom (tested with the Linux-hosted toolchain).
 The tests need `dosbox-x` on the host (override with `DOSBOX=`); set
 `KEEP=1` to keep the work directory.
 
+`make smallerc` builds `whichsc.exe` with Smaller C instead, and
+`make test-smallerc` tests it. This is an experiment, not used for
+releases: see [SMALLERC.md](SMALLERC.md) for the setup and the size
+comparison (the Watcom build is smaller).
+
 The version is the one line in `VERSION`, DOS style (0.01, 0.02, ...
 1.00), not semantic versioning. When a PR that changes it is merged to
 `main`, the release workflow tags the merge commit `v<VERSION>` and
