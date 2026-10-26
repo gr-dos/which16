@@ -21,13 +21,13 @@ The tests need `dosbox-x` on the host (override with `DOSBOX=`); set
 
 `make asm` builds `which.com`, an 8086 assembly version of the same
 program (needs `nasm`). `make test-asm` runs the tests on it and
-compares it with the Watcom build. It is an experiment and is not
-released: see [ASM.md](ASM.md).
+compares it with the Watcom build. It is released alongside
+`which.exe`: see [ASM.md](ASM.md).
 
 The version is the one line in `VERSION`, DOS style (0.01, 0.02, ...
 1.00), not semantic versioning. When a PR that changes it is merged to
 `main`, the release workflow tags the merge commit `v<VERSION>` and
-publishes a GitHub release with `which.exe` attached.
+publishes a GitHub release with `which.exe` and `which.com` attached.
 
 ## Usage
 
@@ -98,7 +98,8 @@ appears twice (or is also the current directory) is searched only once.
 - `VERSION`: the version, compiled in and printed by `--version`
 - `tests/run.sh`: the test suite, run under DOSBox-X by `make test`
 - `which.asm`, `tests/compare.sh`, `ASM.md`: the assembly experiment
-- `.github/workflows/ci.yml`: build and test on PRs and pushes to `main`
+- `.github/workflows/ci.yml`: build and test both versions on PRs and
+  pushes to `main`
 - `.github/workflows/release.yml`: tag and release when `VERSION` changes
 
 ## License
