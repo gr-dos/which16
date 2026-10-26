@@ -19,6 +19,11 @@ Requires Open Watcom (tested with the Linux-hosted toolchain).
 The tests need `dosbox-x` on the host (override with `DOSBOX=`); set
 `KEEP=1` to keep the work directory.
 
+`make asm` builds `which.com`, an 8086 assembly version of the same
+program (needs `nasm`). `make test-asm` runs the tests on it and
+compares it with the Watcom build. It is an experiment and is not
+released: see [ASM.md](ASM.md).
+
 The version is the one line in `VERSION`, DOS style (0.01, 0.02, ...
 1.00), not semantic versioning. When a PR that changes it is merged to
 `main`, the release workflow tags the merge commit `v<VERSION>` and
@@ -92,6 +97,7 @@ appears twice (or is also the current directory) is searched only once.
 - `Makefile`: Open Watcom build (`make`, `make test`, `make clean`)
 - `VERSION`: the version, compiled in and printed by `--version`
 - `tests/run.sh`: the test suite, run under DOSBox-X by `make test`
+- `which.asm`, `tests/compare.sh`, `ASM.md`: the assembly experiment
 - `.github/workflows/ci.yml`: build and test on PRs and pushes to `main`
 - `.github/workflows/release.yml`: tag and release when `VERSION` changes
 

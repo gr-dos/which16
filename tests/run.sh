@@ -34,14 +34,15 @@ export LC_ALL
 # ------------------------------------------------------------------
 # fixtures
 #
-#   c:\       which.exe local.bat qux.exe
+#   c:\       which.exe (or .com) local.bat qux.exe
 #   c:\bin1   foo.com foo.exe bar.bat longname.com plain
 #             hid.com (hidden) sys.com (system)
 #   c:\bin2   foo.exe qux.com readme.txt dir.exe\ (a directory)
 #   d:\       empty, for drive-relative names
 
 cd "$work" || exit 2
-cp "$exe" which.exe
+ext=$(echo "${exe##*.}" | tr A-Z a-z)
+cp "$exe" "which.$ext"
 mkdir bin1 bin2 bin2/dir.exe d
 for f in local.bat qux.exe bin1/foo.com bin1/foo.exe bin1/bar.bat \
          bin1/longname.com bin1/plain bin1/hid.com bin1/sys.com \
