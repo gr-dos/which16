@@ -1,18 +1,26 @@
 # which16
 
-A `which` for 16-bit MS-DOS, built with Open Watcom.
+A `which` for 16-bit MS-DOS, built with Open Watcom and
+[libc16](https://github.com/gr-dos/libc16).
 
 `which` shows the full path of the program `COMMAND.COM` would run for
 a command name. The resulting `which.exe` is a small-model, real-mode
-8086 executable (about 13 KB) that runs on any DOS from an original PC
+8086 executable (about 4 KB) that runs on any DOS from an original PC
 up.
 
 ## Building
 
-Requires Open Watcom (tested with the Linux-hosted toolchain).
+`which.exe` links [libc16](https://github.com/gr-dos/libc16), a C
+runtime for small-model DOS programs, instead of Open Watcom's own, and
+is built with the Open Watcom toolchain that libc16 pins. By default
+`make` runs `scripts/fetch-libc16`, which clones libc16 at the revision
+pinned in that script into `build/libc16` and builds it there; libc16's
+build fetches its Open Watcom snapshot and JWasm into
+`build/libc16/build/tools`. This needs `git`, `curl`, `xz` and a host C
+compiler. To move to a newer libc16, change the pin.
 
-    make                         # uses ~/opt/watcom by default
-    make WATCOM=/path/to/watcom  # or point it elsewhere
+    make                         # fetches libc16 if needed, builds which.exe
+    make LIBC16_ROOT=../libc16   # or use a built local libc16 checkout
     make test                    # runs tests/run.sh under DOSBox-X
     make clean
 
@@ -21,7 +29,7 @@ The tests need `dosbox-x` on the host (override with `DOSBOX=`); set
 
 `make asm` builds `which.com`, an 8086 assembly version of the same
 program (needs `nasm`). `make test-asm` runs the tests on it and
-compares it with the Watcom build. It is released alongside
+compares it with the C build. It is released alongside
 `which.exe`: see [ASM.md](ASM.md).
 
 The version is the one line in `VERSION`, DOS style (0.01, 0.02, ...
@@ -94,7 +102,8 @@ appears twice (or is also the current directory) is searched only once.
 ## Files
 
 - `which.c`: the program
-- `Makefile`: Open Watcom build (`make`, `make test`, `make clean`)
+- `Makefile`: Open Watcom and libc16 build (`make`, `make test`, `make clean`)
+- `scripts/fetch-libc16`: fetches and builds the pinned libc16
 - `VERSION`: the version, compiled in and printed by `--version`
 - `tests/run.sh`: the test suite, run under DOSBox-X by `make test`
 - `which.asm`, `tests/compare.sh`, `ASM.md`: the assembly experiment

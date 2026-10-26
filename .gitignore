@@ -3,3 +3,5 @@
 *.err
 *.exe
 *.com
+*.map
+/build/

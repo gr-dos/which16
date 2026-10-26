@@ -17,6 +17,7 @@
  * Paths are printed in full and in lower case, with the extension.
  */
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,9 +40,25 @@ static int opt_silent;
 static char *dirs[MAXDIRS];   /* PATH, normalized and deduplicated */
 static int ndirs;
 
+/* Writes the strings, up to a null pointer, to fp. */
+static void put(FILE *fp, const char *s, ...)
+{
+    va_list ap;
+
+    va_start(ap, s);
+    for (; s != NULL; s = va_arg(ap, const char *))
+        fputs(s, fp);
+    va_end(ap);
+}
+
+static void try_help(void)
+{
+    fputs("Try 'which --help' for more information.\n", stderr);
+}
+
 static void usage(FILE *fp)
 {
-    fprintf(fp,
+    fputs(
         "Usage: which [OPTION]... NAME...\n"
         "Show the full path of the program COMMAND.COM runs for each NAME.\n"
         "\n"
@@ -54,7 +71,7 @@ static void usage(FILE *fp)
         "  -h, --help     display this help and exit\n"
         "      --version  output version information and exit\n"
         "\n"
-        "Exit status is 0 if every NAME was found, 1 otherwise.\n");
+        "Exit status is 0 if every NAME was found, 1 otherwise.\n", fp);
 }
 
 /* Make DIR absolute in OUT (no trailing backslash except at a root). */
@@ -123,8 +140,8 @@ static int found(const char *dir, struct find_t *f)
         return 0;
     if (!opt_silent) {
         strlwr(f->name);
-        printf("%s%s%s\n", dir,
-               dir[strlen(dir) - 1] == '\\' ? "" : "\\", f->name);
+        put(stdout, dir, dir[strlen(dir) - 1] == '\\' ? "" : "\\", f->name,
+            "\n", NULL);
     }
     return 1;
 }
@@ -136,21 +153,25 @@ static int found(const char *dir, struct find_t *f)
  */
 static int search_dir(const char *dir, const char *base)
 {
-    char pat[_MAX_PATH + 16];
+    char pat[_MAX_PATH + 16], *ext;
     struct find_t f;
     int n = 0;
     size_t i;
 
     if (strlen(dir) + strlen(base) + 6 > sizeof pat)
         return 0;
+    strcpy(pat, dir);
+    strcat(pat, "\\");
+    strcat(pat, base);
     if (strchr(base, '.') != NULL) {
-        sprintf(pat, "%s\\%s", dir, base);
         if (_dos_findfirst(pat, ATTRS, &f) == 0)
             n = found(dir, &f);
         return n;
     }
+    strcat(pat, ".");
+    ext = pat + strlen(pat);
     for (i = 0; i < NEXTS; i++) {
-        sprintf(pat, "%s\\%s.%s", dir, base, exts[i]);
+        strcpy(ext, exts[i]);
         if (_dos_findfirst(pat, ATTRS, &f) == 0 && found(dir, &f)) {
             n++;
             if (!opt_all)
@@ -206,6 +227,7 @@ int main(int argc, char **argv)
 {
     int i, nnames = 0, endopts = 0;
     int rc = 0;
+    char opt[2] = { 0, 0 };
 
     for (i = 1; i < argc; i++) {
         const char *a = argv[i];
@@ -222,11 +244,12 @@ int main(int argc, char **argv)
                 usage(stdout);
                 return 0;
             } else if (strcmp(a, "--version") == 0) {
-                printf("which (dos-which16) %s\n", VERSION);
+                fputs("which (dos-which16) " VERSION "\n", stdout);
                 return 0;
             } else {
-                fprintf(stderr, "%s: unrecognized option '%s'\n", progname, a);
-                fprintf(stderr, "Try 'which --help' for more information.\n");
+                put(stderr, progname, ": unrecognized option '", a, "'\n",
+                    NULL);
+                try_help();
                 return 1;
             }
             argv[i] = NULL;
@@ -241,8 +264,10 @@ int main(int argc, char **argv)
                 usage(stdout);
                 return 0;
             default:
-                fprintf(stderr, "%s: invalid option -- '%c'\n", progname, *a);
-                fprintf(stderr, "Try 'which --help' for more information.\n");
+                opt[0] = *a;
+                put(stderr, progname, ": invalid option -- '", opt, "'\n",
+                    NULL);
+                try_help();
                 return 1;
             }
         }
@@ -250,8 +275,8 @@ int main(int argc, char **argv)
     }
 
     if (nnames == 0) {
-        fprintf(stderr, "%s: missing operand\n", progname);
-        fprintf(stderr, "Try 'which --help' for more information.\n");
+        put(stderr, progname, ": missing operand\n", NULL);
+        try_help();
         return 1;
     }
 
@@ -264,7 +289,7 @@ int main(int argc, char **argv)
             continue;
         if (!which(a)) {
             if (!opt_silent)
-                fprintf(stderr, "%s: %s: not found\n", progname, a);
+                put(stderr, progname, ": ", a, ": not found\n", NULL);
             rc = 1;
         }
     }
