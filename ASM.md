@@ -1,10 +1,10 @@
 # 8086 assembly build (experiment)
 
 This experiment rewrites `which` in 8086 assembly (`which.asm`, NASM) to
-see how small a program with no runtime library can be. It is optional.
-`which.c` with Open Watcom is still the default build, and the only one
-that is released. `which.c` and its tests are the specification for
-the assembly version.
+see how small a program with no runtime library can be. `which.c` with
+Open Watcom is still the default build. Releases include both
+`which.exe` and `which.com`, and CI tests both. `which.c` and its tests
+are the specification for the assembly version.
 
 ## Result
 
@@ -162,8 +162,8 @@ third of the memory and runs on DOS 2.0 and the 8086.
 For the GR-DOS distribution, where small binaries come first, ship
 `which.com` in place of `which.exe` once:
 
-1. `make test-asm` runs in CI. This needs only `nasm` from apt on the
-   current runner; it is not added here, so that CI stays unchanged.
+1. `make test-asm` runs in CI. It does now, with `nasm` from apt, and
+   the release workflow runs it before attaching `which.com`.
 2. A rule is agreed that a PR that changes `which.c` also changes
    `which.asm` and adds comparison cases.
 
