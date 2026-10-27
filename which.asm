@@ -18,7 +18,8 @@ org 0x100
 %define VERSION "unknown"
 %endif
 
-MAX_PATH    equ 144         ; as Open Watcom's _MAX_PATH for DOS
+MAX_PATH    equ 80          ; as libc16's _MAX_PATH
+FULL_WORK   equ 256         ; libc16's _fullpath work buffer
 MAXDIRS     equ 64
 ATTRS       equ 0x03        ; read-only and hidden
 STACK       equ 512
@@ -205,9 +206,11 @@ nomem:
         jmp     exit
 
 ;
-; Split the command tail into argv, as the C runtime does: arguments
-; are separated by spaces and tabs, double quotes group (and are
-; removed), and \" is a literal quote.
+; Split the command tail into argv as libc16 does, which is Microsoft
+; C's rule: arguments are separated by spaces and tabs, double quotes
+; group (and are removed), a run of 2n backslashes before a quote gives
+; n backslashes and a toggle, 2n + 1 give n backslashes and a literal
+; quote, and any other backslash is literal.
 ;
 parse_tail:
         mov     si, TAIL
@@ -237,18 +240,13 @@ parse_tail:
         lodsb
         cmp     al, 0x0d
         je      .last
+        cmp     al, '\'
+        je      .run
         cmp     al, '"'
         jne     .notquote
         xor     dl, 1
         jmp     .char
 .notquote:
-        cmp     al, '\'
-        jne     .notbs
-        cmp     byte [si], '"'
-        jne     .store
-        lodsb
-        jmp     .store
-.notbs:
         test    dl, dl
         jnz     .store
         cmp     al, ' '
@@ -257,6 +255,35 @@ parse_tail:
         je      .end
 .store:
         stosb
+        jmp     .char
+.run:
+        mov     ah, 0                   ; AH = backslashes in the run
+.count:
+        inc     ah
+        lodsb
+        cmp     al, '\'
+        je      .count
+        dec     si                      ; the byte after the run is next
+        cmp     al, '"'
+        mov     al, '\'
+        jne     .lits
+        shr     ah, 1                   ; n
+        sbb     dh, dh                  ; DH = -1 for 2n + 1
+.half:
+        test    ah, ah
+        jz      .dquote
+        stosb
+        dec     ah
+        jmp     .half
+.dquote:
+        test    dh, dh
+        jz      .char                   ; 2n: the '"' toggles when read
+        movsb                           ; 2n + 1: a literal '"'
+        jmp     .char
+.lits:
+        stosb                           ; no '"' follows: all literal
+        dec     ah
+        jnz     .lits
         jmp     .char
 .end:
         mov     al, 0
@@ -295,7 +322,8 @@ build_dirs:
         mov     si, di
         mov     di, [heap_ptr]
         mov     [bd_next], di
-.copy:
+        mov     cx, 256                 ; libc16's getenv takes at most
+.copy:                                  ; 255 bytes, or there is no PATH
         cmp     di, [heap_limit]
         jae     .full
         mov     al, [es:si]
@@ -303,8 +331,9 @@ build_dirs:
         mov     [di], al
         inc     di
         test    al, al
-        jnz     .copy
-        jmp     .copied
+        loopnz  .copy
+        jz      .copied
+        jmp     .noenv
 .full:
         mov     byte [di], 0
         inc     di
@@ -653,147 +682,126 @@ normalize:
         ret
 
 ;
-; Make the path at SI absolute in fullbuf, as Open Watcom's _fullpath
-; does on DOS.  Add the drive (as typed, or the current one) and,
-; unless the path starts with a separator, that drive's current
-; directory and a backslash.  A relative path is then copied with "."
-; and ".." resolved (".." stops at the root; a trailing "." is
-; dropped); an absolute one is copied as it is.  Slashes become
-; backslashes, and repeated ones are kept.  CF if the drive is not
-; valid, ".." follows something other than a separator, or the result
-; is longer than MAX_PATH - 1.
+; Make the path at SI absolute in fullbuf, as libc16's _fullpath does
+; (its docs/spec/dos.md): the drive (as typed, or the current one) in
+; upper case, ":\", then, unless the path starts with a separator,
+; that drive's current directory, then the path.  Components are
+; joined by single backslashes, "/" counts as "\", "." is dropped and
+; ".." removes the last component (stopping at the root).  CF for an
+; empty path, a drive that is not a letter or not valid, or a result
+; that needs more than MAX_PATH bytes with its terminator.
 ;
 fullpath:
-        mov     di, fullbuf
-        mov     al, [si]
-        or      al, 0x20
-        cmp     al, 'a'
-        jb      .curdrive
-        cmp     al, 'z'
-        ja      .curdrive
+        cmp     byte [si], 0
+        je      .fail
         cmp     byte [si + 1], ':'
         jne     .curdrive
+        mov     al, [si]
+        or      al, 0x20
         sub     al, 'a'
-        mov     [f_drive], al
-        movsb
+        cmp     al, 'z' - 'a'
+        ja      .fail
         inc     si
-        jmp     .colon
+        inc     si
+        jmp     .drive
 .curdrive:
         mov     ah, 0x19
         int     0x21
-        mov     [f_drive], al
+.drive:
+        mov     di, fullbuf
+        mov     dl, al
         add     al, 'A'
         stosb
-.colon:
-        mov     al, ':'
-        stosb
-        mov     al, [si]
-        call    is_sep
-        jne     .relative
-        call    strlen
-        mov     ax, fullbuf + MAX_PATH
-        sub     ax, di
-        cmp     cx, ax
-        jae     .fail
-        call    stpcpy
-        jmp     .slashes
-
-.relative:
-        mov     al, '\'
-        stosb
+        mov     ax, ':' | ('\' << 8)
+        stosw
         push    si
-        mov     si, di
-        mov     dl, [f_drive]
-        inc     dl
+        inc     dl                      ; the current directory, which
+        mov     si, cwdbuf              ; also checks the drive
         mov     ah, 0x47
         int     0x21
         pop     si
         jc      .fail
+        mov     al, [si]
+        call    is_sep
+        je      .path
         push    si
-        mov     si, di
-        call    strlen
+        mov     si, cwdbuf
+        call    add_parts
         pop     si
-        add     di, cx
-        cmp     byte [di - 1], '\'
-        je      .loop
-        mov     al, '\'
-        stosb
-.loop:
-        cmp     byte [si], 0
-        je      .end
-        cmp     di, fullbuf + MAX_PATH
-        jae     .end
-        lodsb
-        cmp     al, '.'
-        je      .dot
-        stosb
-        jmp     .loop
-.dot:
-        mov     al, [si]
-        call    is_sep
-        jne     .notdotsep
-        inc     si                      ; "./"
-        mov     al, [di - 1]
-        call    is_sep
-        je      .loop
-        mov     al, '\'
-        stosb
-        jmp     .loop
-.notdotsep:
-        cmp     al, '.'
-        jne     .single
-        inc     si                      ; ".."
-        mov     al, [si]
-        call    is_sep
-        jne     .up
-        inc     si
-.up:
-        mov     al, [di - 1]
-        call    is_sep
-        jne     .fail
-        dec     di
-        dec     di
-.uploop:
-        mov     al, [di]
-        call    is_sep
-        je      .updone
-        cmp     al, ':'
-        je      .uproot
-        dec     di
-        jmp     .uploop
-.uproot:
-        inc     di
-        mov     byte [di], '\'
-.updone:
-        inc     di
-        jmp     .loop
-.single:
-        test    al, al
-        jz      .loop
-        mov     al, '.'
-        stosb
-        jmp     .loop
-.end:
-        cmp     di, fullbuf + MAX_PATH
+        jc      .fail
+.path:
+        call    add_parts
+        jc      .fail
+        mov     ax, di
+        sub     ax, fullbuf
+        cmp     ax, MAX_PATH
         jae     .fail
         mov     byte [di], 0
-.slashes:
-        mov     si, fullbuf
-.slash:
-        lodsb
-        test    al, al
-        jz      .slashed
-        cmp     al, '/'
-        jne     .slash
-        mov     byte [si - 1], '\'
-        jmp     .slash
-.slashed:
-        sub     si, fullbuf
-        cmp     si, MAX_PATH
-        ja      .fail
         clc
         ret
 .fail:
+        stc
+        ret
+
+; Add the components of the path at SI to the one in fullbuf, which
+; ends at DI.  CF if the result would not fit in FULL_WORK bytes.
+add_parts:
+.skip:
+        lodsb
+        call    is_sep
+        je      .skip
+        test    al, al
+        jz      .done
+        lea     bx, [si - 1]            ; BX = the component
+.scan:
+        lodsb
+        test    al, al
+        jz      .scanned
+        call    is_sep
+        jne     .scan
+.scanned:
+        dec     si
+        mov     cx, si
+        sub     cx, bx                  ; CX = its length
+        cmp     byte [bx], '.'
+        jne     .copy
+        cmp     cx, 1
+        je      .skip                   ; "."
+        cmp     cx, 2
+        jne     .copy
+        cmp     byte [bx + 1], '.'
+        jne     .copy
+.up:                                    ; "..": drop the last component
+        cmp     di, fullbuf + 3
+        jbe     .skip
+        dec     di
+        cmp     byte [di], '\'
+        jne     .up
+        jmp     .skip
+.copy:
+        mov     ax, di
+        sub     ax, fullbuf
+        cmp     di, fullbuf + 3
+        jbe     .room
+        inc     ax                      ; for the backslash
+.room:
+        add     ax, cx
+        cmp     ax, FULL_WORK
+        jae     .full
+        cmp     di, fullbuf + 3
+        jbe     .append
+        mov     byte [di], '\'
+        inc     di
+.append:
+        push    si
+        mov     si, bx
+        rep     movsb
+        pop     si
+        jmp     .skip
+.done:
+        clc
+        ret
+.full:
         stc
         ret
 
@@ -990,7 +998,6 @@ opt_all:    resb 1
 opt_silent: resb 1
 endopts:    resb 1
 status:     resb 1
-f_drive:    resb 1
 w_hasdir:   resb 1
 nnames:     resw 1
 argv_end:   resw 1
@@ -1017,5 +1024,6 @@ dirbuf:     resb MAX_PATH + 2
 first:      resb MAX_PATH
 dirtmp:     resb MAX_PATH
 pat:        resb MAX_PATH + 16
-fullbuf:    resb MAX_PATH + 72
+fullbuf:    resb FULL_WORK
+cwdbuf:     resb 64
 heap:

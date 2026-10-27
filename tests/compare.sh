@@ -89,6 +89,8 @@ foo --bogus
 "foo bar"
 fo"o b"ar
 a\\"b
+c:\\\\bin1\\\\"foo"
+c:\\\\bin1\\\\\\"foo
 "" foo
 FOO.Com
 foo.BAT
