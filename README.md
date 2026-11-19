@@ -110,7 +110,8 @@ appears twice (or is also the current directory) is searched only once.
 - `scripts/fetch-libc16`: fetches and builds the pinned libc16
 - `VERSION`: the version, compiled in and printed by `--version`
 - `tests/run.sh`: the test suite, run under DOSBox-X by `make test`
-- `which.asm`, `tests/compare.sh`, `ASM.md`: the assembly experiment
+- `which.asm`, `tests/compare.sh`, `tests/heap.sh`, `ASM.md`: the assembly
+  experiment
 - `.github/workflows/ci.yml`: build and test both versions on PRs and
   pushes to `main`
 - `.github/workflows/release.yml`: tag and release when `VERSION` changes

@@ -55,12 +55,18 @@ asm: which.com
 which.com: which.asm VERSION
 	$(NASM) -f bin '-DVERSION="$(VERSION)"' -o $@ which.asm
 
-# tests/run.sh, then the same commands as the C build
-test-asm: which.com which.exe
+# For tests/heap.sh only: a 40-byte heap, to test running out of it.
+which-heap.com: which.asm
+	$(NASM) -f bin -DTEST_HEAP=40 '-DVERSION="heap"' -o $@ which.asm
+
+# tests/run.sh, then the same commands as the C build, then running
+# out of heap
+test-asm: which.com which.exe which-heap.com
 	sh tests/run.sh $(CURDIR)/which.com
 	sh tests/compare.sh which.exe which.com
+	sh tests/heap.sh which-heap.com
 
 clean:
-	rm -f *.o *.obj *.err *.map which.exe which.com
+	rm -f *.o *.obj *.err *.map which.exe which.com which-heap.com
 
 .PHONY: test asm test-asm clean
