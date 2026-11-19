@@ -7,6 +7,9 @@
 ;
 ; Build: nasm -f bin -DVERSION='"0.01"' -o which.com which.asm
 ;
+; For tests only, -DTEST_HEAP=N limits the heap to N bytes, so that
+; running out of it can be tested without a machine short of memory.
+;
 ; SPDX-License-Identifier: MIT
 ;
 
@@ -42,6 +45,12 @@ start:
         jc      nomem
         cmp     ax, heap
         jb      nomem
+%ifdef TEST_HEAP
+        cmp     ax, heap + TEST_HEAP
+        jbe     .limit
+        mov     ax, heap + TEST_HEAP
+.limit:
+%endif
         push    ax
         mov     di, bss                 ; DOS does not clear it
         mov     cx, heap - bss
@@ -198,9 +207,13 @@ print_exit0:
         mov     al, 0
         jmp     exit
 
+; Out of memory, before anything is printed: the heap holds PATH and
+; its directories, which build_dirs collects before any search.
 nomem:
         mov     dx, m_nomem
-        mov     ah, 0x09
+        mov     cx, m_nomem_len
+        mov     bx, 2
+        mov     ah, 0x40
         int     0x21
         mov     al, 1
         jmp     exit
@@ -318,29 +331,35 @@ build_dirs:
         cmp     byte [es:bx - 1], 0
         jne     .skipvar
         jmp     .var
-.found:                                 ; copy the value to the heap
+.found:                                 ; ES:DI = the value
         mov     si, di
+        xor     cx, cx
+.len:
+        cmp     byte [es:di], 0
+        je      .gotlen
+        inc     di
+        inc     cx
+        cmp     cx, 256                 ; libc16's getenv takes at most
+        jb      .len                    ; 255 bytes, or there is no PATH
+        jmp     .noenv
+.gotlen:                                ; copy it, all or none, to the heap
+        inc     cx
         mov     di, [heap_ptr]
         mov     [bd_next], di
-        mov     cx, 256                 ; libc16's getenv takes at most
-.copy:                                  ; 255 bytes, or there is no PATH
-        cmp     di, [heap_limit]
-        jae     .full
-        mov     al, [es:si]
-        inc     si
-        mov     [di], al
-        inc     di
-        test    al, al
-        loopnz  .copy
-        jz      .copied
-        jmp     .noenv
-.full:
-        mov     byte [di], 0
-        inc     di
-.copied:
-        mov     [heap_ptr], di
+        mov     ax, [heap_limit]
+        sub     ax, di
+        cmp     ax, cx
+        jae     .fits
+        jmp     nomem
+.fits:
+        push    es
         push    ds
         pop     es
+        pop     ds
+        rep     movsb
+        push    es
+        pop     ds
+        mov     [heap_ptr], di
 
         mov     si, [bd_next]
 .entry:                                 ; si: start of an entry
@@ -420,15 +439,17 @@ add_dir:
         mov     di, [heap_ptr]
         mov     ax, di
         add     ax, cx
-        jc      .ret
+        jc      .nomem
         cmp     ax, [heap_limit]
-        ja      .ret
+        ja      .nomem
         mov     [bx], di
         rep     movsb
         mov     [heap_ptr], di
         add     word [dirs_end], 2
 .ret:
         ret
+.nomem:
+        jmp     nomem
 
 ;
 ; Look for the name at SI.  Prints what is found; AX = 1 if anything
@@ -979,7 +1000,8 @@ m_missing:  db  "which: missing operand", 10, 0
 m_try:      db  "Try 'which --help' for more information.", 10, 0
 m_which:    db  "which: ", 0
 m_notfound: db  ": not found", 10, 0
-m_nomem:    db  "which: not enough memory", 13, 10, "$"
+m_nomem:    db  "which: not enough memory", 13, 10
+m_nomem_len equ $ - m_nomem
 s_all:      db  "--all", 0
 s_silent:   db  "--silent", 0
 s_help:     db  "--help", 0

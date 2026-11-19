@@ -11,11 +11,11 @@ are the specification for the assembly version.
 | Build | Format | Bytes | vs C |
 | --- | --- | ---: | ---: |
 | `which.exe`, Open Watcom with libc16 (default) | `.EXE` | 4,252 | — |
-| **`which.com`, NASM** | `.COM` | **2,530** | **−40.5%** |
+| **`which.com`, NASM** | `.COM` | **2,545** | **−40.1%** |
 | `which.exe` with Open Watcom 2.0's own runtime (before libc16) | `.EXE` | 13,220 | +211% |
 | `whichsc.exe`, Smaller C 1.0.2, 8086 (PR #3) | `.EXE` | 13,598 | +220% |
 
-The `.COM` file is 1,708 bytes of code and 822 bytes of data. More than
+The `.COM` file is 1,724 bytes of code and 821 bytes of data. More than
 half of the data (about 600 bytes) is the `--help` text.
 
 Space taken on disk, in FAT clusters:
@@ -36,7 +36,7 @@ of `which`. Before libc16 it saved 10.
 | --- | ---: | ---: |
 | needed to load and run | about 7.1 KB (PSP 256 + image 4,204 + 2,768 minimum allocation) | about 4.8 KB |
 
-The `.COM` uses its 256-byte PSP, the 2,530-byte image, 1,585 bytes of
+The `.COM` uses its 256-byte PSP, the 2,545-byte image, 1,585 bytes of
 uninitialised data (buffers and variables), and a 512-byte stack. On
 top of that is a small heap, which holds a copy of `PATH` and the
 deduplicated directories. With an ordinary `PATH` that is a few
@@ -45,8 +45,12 @@ is about 5.4 KB. (With Open Watcom's own runtime, `which.exe` needed
 about 15 KB.)
 
 At startup the program checks that the stack and its buffers fit
-below SP. If they do not, it prints `which: not enough memory` and
-exits with status 1. As with any `.COM`, DOS gives the program the
+below SP. Before it searches for anything, it copies `PATH` to the
+heap and then adds each new directory, and it checks before each copy
+that it fits. If any of these do not fit, it prints `which: not enough
+memory` on standard error and exits with status 1. It prints nothing
+on standard output and does not search a partial `PATH`, so running
+out of memory never shows up as a wrong result or a wrong `not found`. As with any `.COM`, DOS gives the program the
 largest free memory block while it runs and frees it on exit. That
 does not matter for a utility that does not stay resident.
 
@@ -55,7 +59,7 @@ does not matter for a utility that does not stay resident.
 - **8086:** the source starts with `cpu 8086`, so NASM rejects any
   later instruction.
 - **DOS 2.0 and later:** the program uses only DOS 2.0 functions:
-  09h, 19h, 1Ah, 40h, 47h, 4Ch and 4Eh, plus the PSP command tail and
+  19h, 1Ah, 40h, 47h, 4Ch and 4Eh, plus the PSP command tail and
   environment segment. `tests/compare.sh` runs every comparison a
   second time with DOSBox-X reporting DOS 2.11, and all pass. DOSBox-X
   still provides its newer functions when it reports 2.11, so this
@@ -69,6 +73,7 @@ does not matter for a utility that does not stay resident.
 | --- | --- |
 | `tests/run.sh` (102 checks, the existing suite) | 102 passed |
 | `tests/compare.sh` (83 steps, run once normally and once under DOS 2.11) | 166 passed |
+| `tests/heap.sh` (12 checks, running out of heap) | 12 passed |
 
 `tests/compare.sh` is new. It runs the same commands with the C build
 and the assembly build in the same fixture, and requires the
@@ -93,6 +98,19 @@ to be the same. It covers what `run.sh` does not:
 The harness has been checked to catch a difference: a build with a
 different version fails the four `--version` steps.
 
+`tests/heap.sh` tests running out of heap. Running out of real memory
+takes a machine with almost none free, which DOSBox-X does not easily
+set up, so the test uses `which-heap.com`, built from the same source
+with `-DTEST_HEAP=40`, which limits the heap to 40 bytes. Released
+builds do not use that option. The test checks a `PATH` that fits, a
+`PATH` whose third directory does not fit, a `PATH` that does not fit
+at all, and a `PATH` over 255 characters, which is unset and so needs
+no heap. Where the heap runs out, standard output must be empty, even
+for a name in the current directory, and the exit status must be 1.
+Before this check was added, `which.com` searched only the
+directories that fit and exited with status 0; the test fails on that
+version.
+
 Standard error is not compared, because DOS cannot redirect it. The
 messages are the same strings as in `which.c`: `unrecognized option`,
 `invalid option`, `missing operand`, the `Try 'which --help'` line,
@@ -102,7 +120,8 @@ and `NAME: not found`.
 
     make asm          # which.com
     make test-asm     # tests/run.sh on which.com, then tests/compare.sh
-                      # against which.exe (so it needs libc16 too)
+                      # against which.exe (so it needs libc16 too),
+                      # then tests/heap.sh on which-heap.com
 
 Tools, as tested:
 
@@ -134,10 +153,11 @@ The assembly version is a separate implementation, written from
 - **`getenv`**: it matches `PATH=` exactly, as libc16 does, and treats
   a value longer than 255 characters as unset.
 - **Out of memory:** the C version would fail to load. The
-  assembly version prints its own message, as described above. If the
-  heap runs out while copying `PATH` (which takes a machine with almost
-  no free memory), `PATH` is cut short and the directories that are
-  left are skipped.
+  assembly version prints its own message and exits with status 1, as
+  described above, whether it runs out at startup or while copying
+  `PATH` and its directories to the heap (which takes a machine with
+  almost no free memory). Where `which.c` would skip a directory
+  `strdup` could not copy, the assembly version stops.
 - **Output:** each line is written to DOS as soon as it is found, with
   `\n` written as CR LF, as libc16's unbuffered streams do.
 
